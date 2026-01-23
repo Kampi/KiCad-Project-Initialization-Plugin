@@ -1,0 +1,28 @@
+{
+  "name": "KiCad Project Initialization Plugin",
+  "description": "Initialize KiCad projects with customizable metadata",
+  "description_full": "This plugin allows you to easily initialize or update KiCad project metadata including PROJECT_NAME, BOARD_NAME, DESIGNER, COMPANY, REVISION, and RELEASE_DATE. The plugin updates both the .kicad_pro file text variables and the board title block.",
+  "identifier": "com.github.kicad.project_init",
+  "type": "plugin",
+  "author": {
+    "name": "Daniel Kampert",
+    "contact": {
+      "web": "https://github.com/Kampi/KiCad-Library"
+    }
+  },
+  "license": "GPL-3.0",
+  "resources": {
+    "homepage": "https://github.com/Kampi/KiCad-Library"
+  },
+  "versions": [
+    {
+      "version": "1.0.0",
+      "status": "stable",
+      "kicad_version": "7.0",
+      "download_url": "",
+      "download_size": 0,
+      "download_sha256": "",
+      "install_size": 0
+    }
+  ]
+}
