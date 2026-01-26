@@ -15,6 +15,9 @@ env:
   # Master branch (main or master)
   master_branch: main
 
+permissions:
+  contents: read
+
 jobs:
   validate-changelog:
     runs-on: ubuntu-latest
