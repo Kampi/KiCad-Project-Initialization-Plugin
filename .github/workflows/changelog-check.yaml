@@ -36,7 +36,7 @@ jobs:
           echo "Validating CHANGELOG.md format..."
           
           # Check if [Unreleased] section exists
-          if ! grep -q "\[Unreleased\]" "$CHANGELOG_FILE"; then
+          if ! grep -q '\[Unreleased\]' "$CHANGELOG_FILE"; then
             echo "Error: [Unreleased] section not found in CHANGELOG.md"
             exit 1
           fi

@@ -9,8 +9,8 @@ on:
       - main
       - master
     paths-ignore:
-      - '*.md'
-      - '.github/**'
+      - 'README.md'
+      - '.github/workflows/changelog-check.yaml'
 
 env:
   # Master branch (main or master)
@@ -49,7 +49,7 @@ jobs:
           fi
           
           # Check if the version exists in CHANGELOG
-          if ! grep -q "## \[${VERSION}\]" "$CHANGELOG_FILE"; then
+          if ! grep -q "## \\[${VERSION}\\]" "$CHANGELOG_FILE"; then
             echo "Error: Version ${VERSION} not found in CHANGELOG.md"
             echo "Please ensure CHANGELOG.md contains a section for version ${VERSION}"
             exit 1
@@ -202,7 +202,7 @@ jobs:
           echo "Updating CHANGELOG with version: ${{ env.VERSION }}"
           
           # Check if [Unreleased] section exists
-          if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+          if ! grep -q '## \[Unreleased\]' CHANGELOG.md; then
             echo "No [Unreleased] section found, skipping CHANGELOG update"
             exit 0
           fi
@@ -215,10 +215,12 @@ jobs:
           fi
           
           # Replace ## [Unreleased] with version and date
-          sed -i "s/^## \[Unreleased\]/## [${{ env.VERSION }}] - ${{ env.DATE }}/" CHANGELOG.md
+          sed -i 's/^## \[Unreleased\]/## [${{ env.VERSION }}] - ${{ env.DATE }}/' CHANGELOG.md
           
           # Add new [Unreleased] section at the top after the header
-          sed -i '/^# CHANGELOG/a \\n## [Unreleased]' CHANGELOG.md
+          # Using a temporary file approach for better portability
+          awk '/^# CHANGELOG/ { print; print ""; print "## [Unreleased]"; next }1' CHANGELOG.md > CHANGELOG.md.tmp
+          mv CHANGELOG.md.tmp CHANGELOG.md
           
           echo "✓ Updated CHANGELOG.md with version ${{ env.VERSION }}"
 
