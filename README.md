@@ -234,6 +234,36 @@ Enable Python scripting output in KiCad:
 
 Suggestions for improvements and bug reports are welcome! Create an issue or pull request on GitHub.
 
+### Development Workflow
+
+This project uses an automated CI/CD pipeline for releases:
+
+#### Branch Naming Convention
+
+Development branches must follow the format: `Major.Minor.Patch_Dev` (e.g., `1.2.3_Dev`)
+
+#### Release Process
+
+1. **Development**: Work on a development branch (e.g., `1.0.1_Dev`)
+   - The CI/CD will automatically extract the version from the branch name
+   - Version in `metadata.json` will be updated automatically
+
+2. **CHANGELOG Updates**: Update the `[Unreleased]` section in `CHANGELOG.md`
+   - Use sections: `### Added`, `### Changed`, `### Fixed`, `### Removed`
+   - Format: `- Description of change`
+   - CHANGELOG format is validated automatically on pull requests
+
+3. **Merge to Main**: When merging/rebasing to `main`:
+   - The `[Unreleased]` section is automatically renamed to the version with date
+   - A new `[Unreleased]` section is created
+   - Version in `metadata.json` is updated
+   - A git tag is created automatically
+
+4. **Automatic Release**: The tag triggers:
+   - Validation of CHANGELOG format
+   - Creation of a release package (ZIP file with all plugin files)
+   - Publishing as a GitHub release
+
 ## License
 
 GPL-3.0 - See LICENSE file
