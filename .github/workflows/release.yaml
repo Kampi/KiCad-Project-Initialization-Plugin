@@ -1,0 +1,259 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '*.md'
+      - '.github/**'
+
+env:
+  # Master branch (main or master)
+  master_branch: main
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      
+      - name: Extract version from tag
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          echo "VERSION=${TAG_NAME}" >> ${GITHUB_ENV}
+          echo "Using version from tag: ${TAG_NAME}"
+
+      - name: Validate CHANGELOG format
+        shell: bash
+        run: |
+          CHANGELOG_FILE="CHANGELOG.md"
+          
+          if [ ! -f "$CHANGELOG_FILE" ]; then
+            echo "Error: CHANGELOG.md not found"
+            exit 1
+          fi
+          
+          # Check if the version exists in CHANGELOG
+          if ! grep -q "## \[${VERSION}\]" "$CHANGELOG_FILE"; then
+            echo "Error: Version ${VERSION} not found in CHANGELOG.md"
+            echo "Please ensure CHANGELOG.md contains a section for version ${VERSION}"
+            exit 1
+          fi
+          
+          echo "✓ CHANGELOG.md contains version ${VERSION}"
+
+      - name: Create release package
+        shell: bash
+        run: |
+          # Create a zip file with all plugin files
+          zip -r kicad-project-init-plugin-${VERSION}.zip \
+            __init__.py \
+            kicad_project_init.py \
+            metadata.json \
+            icon.png \
+            README.md \
+            LICENSE \
+            CHANGELOG.md \
+            __Project__/
+          
+          echo "Created release package: kicad-project-init-plugin-${VERSION}.zip"
+          ls -lh kicad-project-init-plugin-${VERSION}.zip
+
+      - name: Release
+        uses: docker://antonyurchenko/git-release:v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG_FILE: CHANGELOG.md
+        with:
+          args: |
+            kicad-project-init-plugin-${VERSION}.zip
+  
+  update_version:
+    if: github.ref_type == 'branch' && github.ref_name != 'main' && github.ref_name != 'master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize
+        run: |
+          mkdir -p log
+          echo "DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> "${GITHUB_ENV}"
+
+      - name: Get release version from branch name
+        run: |
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          echo "BRANCH_NAME=${BRANCH_NAME}"
+          
+          # Extract version from branch name (format: x.y.z_Dev)
+          if [[ ! "$BRANCH_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+_Dev$ ]]; then
+            echo "Warning: Branch name '${BRANCH_NAME}' does not match expected format (x.y.z_Dev)"
+            echo "Skipping version update"
+            exit 0
+          fi
+          
+          BASE_VERSION="${BRANCH_NAME%%_*}"
+          
+          # Split version into components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${BASE_VERSION}"
+          
+          echo "MAJOR=${MAJOR}" >> ${GITHUB_ENV}
+          echo "MINOR=${MINOR}" >> ${GITHUB_ENV}
+          echo "PATCH=${PATCH}" >> ${GITHUB_ENV}
+          echo "VERSION=${BASE_VERSION}" >> ${GITHUB_ENV}
+          
+          echo "Extracted version: ${BASE_VERSION} (Major: ${MAJOR}, Minor: ${MINOR}, Patch: ${PATCH})"
+
+      - name: Update version numbers
+        shell: bash
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "No version to update, skipping"
+            exit 0
+          fi
+          
+          echo "Updating version in metadata.json to: ${{ env.VERSION }}"
+          
+          # Update metadata.json version field
+          jq --arg version "${{ env.VERSION }}" '.versions[0].version = $version' metadata.json > metadata.json.tmp
+          mv metadata.json.tmp metadata.json
+          
+          echo "✓ Updated metadata.json version to ${{ env.VERSION }}"
+
+      - name: Push version updates
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          branch: ${{ github.ref_name }}
+          commit_message: Update version to ${{ env.VERSION }} from CI/CD (${{ env.DATE }})
+          file_pattern: metadata.json
+  
+  release_changelog_update:
+    if: github.ref_type == 'branch' && (github.ref_name == 'main' || github.ref_name == 'master')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize
+        run: |
+          mkdir -p log
+          echo "DATE=$(date +'%Y-%m-%d')" >> "${GITHUB_ENV}"
+          echo "DATETIME=$(date +'%Y-%m-%d %H:%M:%S')" >> "${GITHUB_ENV}"
+
+      - name: Get release version from merged branch
+        run: |
+          # Get the source branch name from the merge commit
+          # This extracts the branch name that was merged into main
+          MERGE_MSG=$(git log -1 --pretty=%B)
+          echo "Merge message: ${MERGE_MSG}"
+          
+          # Extract branch name from merge message (format: "Merge branch 'x.y.z_Dev'")
+          if [[ "$MERGE_MSG" =~ Merge[[:space:]].*[[:space:]]\'([0-9]+\.[0-9]+\.[0-9]+_Dev)\' ]]; then
+            SOURCE_BRANCH="${BASH_REMATCH[1]}"
+            echo "Detected source branch: ${SOURCE_BRANCH}"
+            
+            BASE_VERSION="${SOURCE_BRANCH%%_*}"
+            
+            # Split version into components
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${BASE_VERSION}"
+            
+            echo "MAJOR=${MAJOR}" >> ${GITHUB_ENV}
+            echo "MINOR=${MINOR}" >> ${GITHUB_ENV}
+            echo "PATCH=${PATCH}" >> ${GITHUB_ENV}
+            echo "VERSION=${BASE_VERSION}" >> ${GITHUB_ENV}
+            
+            echo "Extracted version: ${BASE_VERSION} (Major: ${MAJOR}, Minor: ${MINOR}, Patch: ${PATCH})"
+          else
+            echo "No version branch merged, checking metadata.json for current version"
+            
+            # Fallback: get version from metadata.json
+            CURRENT_VERSION=$(jq -r '.versions[0].version' metadata.json)
+            echo "VERSION=${CURRENT_VERSION}" >> ${GITHUB_ENV}
+            echo "Using version from metadata.json: ${CURRENT_VERSION}"
+          fi
+
+      - name: Update CHANGELOG for release
+        shell: bash
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "No version detected, skipping CHANGELOG update"
+            exit 0
+          fi
+          
+          echo "Updating CHANGELOG with version: ${{ env.VERSION }}"
+          
+          # Check if [Unreleased] section exists
+          if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+            echo "No [Unreleased] section found, skipping CHANGELOG update"
+            exit 0
+          fi
+          
+          # Check if [Unreleased] section has content
+          UNRELEASED_CONTENT=$(awk '/\[Unreleased\]/,/^## \[/' CHANGELOG.md | sed '1d;$d')
+          if [ -z "$UNRELEASED_CONTENT" ]; then
+            echo "Warning: [Unreleased] section is empty, skipping CHANGELOG update"
+            exit 0
+          fi
+          
+          # Replace ## [Unreleased] with version and date
+          sed -i "s/^## \[Unreleased\]/## [${{ env.VERSION }}] - ${{ env.DATE }}/" CHANGELOG.md
+          
+          # Add new [Unreleased] section at the top after the header
+          sed -i '/^# CHANGELOG/a \\n## [Unreleased]' CHANGELOG.md
+          
+          echo "✓ Updated CHANGELOG.md with version ${{ env.VERSION }}"
+
+      - name: Update metadata.json version
+        shell: bash
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "No version detected, skipping metadata.json update"
+            exit 0
+          fi
+          
+          echo "Updating metadata.json version to: ${{ env.VERSION }}"
+          
+          # Update metadata.json version field
+          jq --arg version "${{ env.VERSION }}" '.versions[0].version = $version' metadata.json > metadata.json.tmp
+          mv metadata.json.tmp metadata.json
+          
+          echo "✓ Updated metadata.json version to ${{ env.VERSION }}"
+
+      - name: Push release updates
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          branch: ${{ github.ref_name }}
+          commit_message: Release ${{ env.VERSION }} - Update CHANGELOG and version (${{ env.DATETIME }})
+          file_pattern: CHANGELOG.md metadata.json
+
+      - name: Create release tag
+        if: env.VERSION != ''
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create and push tag
+          git tag -a "${{ env.VERSION }}" -m "Release version ${{ env.VERSION }}"
+          git push origin "${{ env.VERSION }}"
+          
+          echo "✓ Created and pushed tag: ${{ env.VERSION }}"
