@@ -8,9 +8,11 @@ on:
     branches:
       - main
       - master
-    paths-ignore:
-      - 'README.md'
-      - '.github/workflows/changelog-check.yaml'
+    paths:
+      - 'CHANGELOG.md'
+      - 'metadata.json'
+      - '**.py'
+      - '__Project__/**'
 
 env:
   # Master branch (main or master)
@@ -80,8 +82,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHANGELOG_FILE: CHANGELOG.md
         with:
-          args: |
-            kicad-project-init-plugin-${VERSION}.zip
+          args: kicad-project-init-plugin-${VERSION}.zip
   
   update_version:
     if: github.ref_type == 'branch' && github.ref_name != 'main' && github.ref_name != 'master'
@@ -218,8 +219,8 @@ jobs:
           sed -i 's/^## \[Unreleased\]/## [${{ env.VERSION }}] - ${{ env.DATE }}/' CHANGELOG.md
           
           # Add new [Unreleased] section at the top after the header
-          # Using a temporary file approach for better portability
-          awk '/^# CHANGELOG/ { print; print ""; print "## [Unreleased]"; next }1' CHANGELOG.md > CHANGELOG.md.tmp
+          # Using awk to find the exact "# CHANGELOG" header and insert after it
+          awk 'NR==1 && /^# CHANGELOG$/ { print; print ""; print "## [Unreleased]"; next }1' CHANGELOG.md > CHANGELOG.md.tmp
           mv CHANGELOG.md.tmp CHANGELOG.md
           
           echo "✓ Updated CHANGELOG.md with version ${{ env.VERSION }}"
