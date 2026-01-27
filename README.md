@@ -4,10 +4,14 @@ A vibe-coded KiCad Action Plugin for creating new projects from a given project 
 
 ## Overview
 
-This plugin is based on the `init-project.sh` script and offers two main functions:
+This plugin is based on the [`init-project.sh`](https://github.com/Kampi/KiCad/tree/master/Scripts) script and offers two main functions:
 
 1. **Create New Project** - Copies the `__Project__` from [KiCad Library](https://github.com/Kampi/KiCad) repository template and initializes all files
 2. **Update Existing Project** - Updates metadata of an already opened project
+
+![Create Project](docs/images/Create%20Project.jpg)
+
+![New Project from Template](docs/images/New%20Project%20from%20Template.jpg)
 
 ## Features
 
@@ -81,7 +85,7 @@ The plugin directory is located in different places depending on the operating s
 **Windows:**
 
 ```text
-%APPDATA%\kicad\7.0\scripting\plugins\
+%APPDATA%\kicad\...\scripting\plugins\
 ```
 
 **Linux:**
@@ -155,21 +159,9 @@ kicad_project_init_plugin/
 
 The plugin is thus completely portable - no separate template setup required!
 
-## File Structure
-
-```text
-kicad_project_init_plugin/
-├── __init__.py              # Plugin registration
-├── kicad_project_init.py    # Main plugin code
-├── metadata.json            # Plugin metadata
-├── icon.png                 # Plugin icon (64x64 px)
-├── create_icon.py           # Helper script to create the icon
-└── README.md                # This file
-```
-
 ## Requirements
 
-- KiCad 7.0 or newer (recommended)
+- KiCad 7.0 or newer (>9.0 recommended)
 - Python 3.x (included with KiCad)
 - wxPython (included with KiCad)
 
@@ -198,8 +190,6 @@ The following features are deliberately **not** included in the plugin, as they 
 - ❌ README.md generation
 - ❌ AsciiDoc documentation
 - ❌ Commit message template
-
-**Recommendation:** Use the `init-project.sh` script for complete project initialization including Git/GitHub, and the plugin for quick project creation directly from KiCad.
 
 ### When Updating Existing Projects
 
@@ -238,28 +228,14 @@ Suggestions for improvements and bug reports are welcome! Create an issue or pul
 
 GPL-3.0 - See LICENSE file
 
-## Author
+## Maintainer
 
-Based on the `init-project.sh` script from the KiCad Project Template Repository.
-
-## Version
-
-## Known Limitations
-
-- Git integration is not included (use the original script for Git setup)
-- GitHub workflow configuration must be adjusted manually
-- The plugin cannot set remote Git URLs
+**Daniel Kampert**  
+📧 [DanielKampert@kampis-elektroecke.de](mailto:DanielKampert@kampis-elektroecke.de)  
+🌐 [www.kampis-elektroecke.de](https://www.kampis-elektroecke.de)
 
 ## Further Links
 
 - [KiCad Plugin Documentation](https://dev-docs.kicad.org/en/python/pcbnew/)
 - [Original init-project.sh Script](../../Scripts/init-project.sh)
 - [KiCad Forum - Plugin Development](https://forum.kicad.info/)
-
-## Support
-
-If you have questions or problems:
-
-1. Check the FAQ above
-2. Look at the KiCad Scripting Console for error messages
-3. Create an issue on GitHub with a detailed error description
