@@ -14,9 +14,12 @@ on:
 env:
   output: Plugin
 
+<<<<<<< HEAD
   # Master branch (main or master). Can be changed for testing
   master_branch: master
 
+=======
+>>>>>>> 6096802 (Task: Add images to the documentation)
 permissions:
   contents: write
 
@@ -31,23 +34,101 @@ jobs:
         with:
           submodules: recursive
 
+<<<<<<< HEAD
       - name: Download updated CHANGELOG
         uses: actions/download-artifact@v4
         with:
           name: CHANGELOG
           path: .
+=======
+      - name: Extract version from merged branch
+        id: extract_version
+        run: |
+          # Get the merged branch name from the merge commit
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+          
+          # Extract branch name from merge commit message (e.g., "Merge branch '0.0.2_Dev'")
+          BRANCH_NAME=$(echo "$COMMIT_MSG" | sed -n "s/.*Merge.*branch '\([^']*\)'.*/\1/p")
+          
+          if [ -z "$BRANCH_NAME" ]; then
+            # Try alternative merge message format
+            BRANCH_NAME=$(echo "$COMMIT_MSG" | sed -n "s/.*Merge.*branch \"\([^\"]*\)\".*/\1/p")
+          fi
+          
+          if [ -z "$BRANCH_NAME" ]; then
+            # No merge commit found, try to get version from commit message directly
+            echo "::warning::No merge commit detected, trying to extract version from commit message"
+            VERSION=$(echo "$COMMIT_MSG" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(_[A-Za-z0-9]+)?' | head -n 1)
+          else
+            echo "Merged branch: $BRANCH_NAME"
+            # Extract version from branch name (format: X.Y.Z_Dev or X.Y.Z)
+            VERSION=$(echo "$BRANCH_NAME" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(_[A-Za-z0-9]+)?' | head -n 1)
+          fi
+          
+          if [ -z "$VERSION" ]; then
+            echo "::error::No version found in commit message or branch name"
+            exit 1
+          fi
+          
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Extracted version: $VERSION"
+
+      - name: Update CHANGELOG.md
+        run: |
+          # Get repository URL
+          REPO_URL="https://github.com/${{ github.repository }}"
+          
+          # Get the previous release tag (exclude current version if it exists)
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | grep -v "^$VERSION$" | head -n 1 || true)
+          
+          # Replace [Unreleased] with [VERSION] - DATE
+          sed -i "s/^## \[Unreleased\]/## [$VERSION] - $(date +'%Y-%m-%d')/" CHANGELOG.md
+          
+          # Add new Unreleased section at the top
+          sed -i '/^# CHANGELOG/a\\n## [Unreleased]' CHANGELOG.md
+          
+          # Update or add version comparison links at the bottom of the file
+          if grep -q "^\[Unreleased\]:" CHANGELOG.md; then
+            # Update existing Unreleased link
+            sed -i "s|^\[Unreleased\]:.*|[Unreleased]: $REPO_URL/compare/$VERSION...HEAD|" CHANGELOG.md
+          else
+            # Add Unreleased link
+            echo "" >> CHANGELOG.md
+            echo "[Unreleased]: $REPO_URL/compare/$VERSION...HEAD" >> CHANGELOG.md
+          fi
+          
+          # Add link for the new version
+          if [ -n "$PREVIOUS_TAG" ]; then
+            # Add comparison link between versions
+            echo "[$VERSION]: $REPO_URL/compare/$PREVIOUS_TAG...$VERSION" >> CHANGELOG.md
+          else
+            # First release, link to the tag
+            echo "[$VERSION]: $REPO_URL/releases/tag/$VERSION" >> CHANGELOG.md
+          fi
+>>>>>>> 6096802 (Task: Add images to the documentation)
 
       - name: ZIP artifact
         shell: bash
         run: |
+<<<<<<< HEAD
           apt-get update
           apt-get install -y zip
           zip -r "${{ env.output }}.zip" "."
+=======
+          sudo apt-get update
+          sudo apt-get install -y zip
+          zip -r "${{ env.output }}.zip" . -i "*.py" "*.json" "*.md" "__Project__/*" -x "*.git*"
+>>>>>>> 6096802 (Task: Add images to the documentation)
 
       - name: Release
         uses: docker://antonyurchenko/git-release:v6
         env:
+<<<<<<< HEAD
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+=======
+          GITHUB_TOKEN: ${{ github.token }}
+>>>>>>> 6096802 (Task: Add images to the documentation)
           CHANGELOG_FILE: ./CHANGELOG.md
         with:
           args: |
