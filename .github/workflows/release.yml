@@ -1,29 +1,20 @@
-name: Release
+name: KiCad Plugin Release
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - '[0-9]+.[0-9]+.[0-9]+' # Match semantic versioning tags
     branches:
       - main
-      - dev
-    paths-ignore:
-      - '*.md'
-
-env:
-  output: Plugin
+      - master
 
 permissions:
   contents: write
 
 jobs:
   release:
+    name: KiCad Plugin Release
     runs-on: ubuntu-latest
-
-    if: github.ref_type == 'tag'
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v5
         with:
           submodules: recursive
@@ -58,8 +49,11 @@ jobs:
             exit 1
           fi
           
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Extracted version: $VERSION"
+          # Remove _Dev suffix for the release version
+          RELEASE_VERSION=$(echo "$VERSION" | sed 's/_Dev$//')
+          
+          echo "VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
+          echo "Extracted version: $RELEASE_VERSION"
 
       - name: Update CHANGELOG.md
         run: |
@@ -73,7 +67,7 @@ jobs:
           sed -i "s/^## \[Unreleased\]/## [$VERSION] - $(date +'%Y-%m-%d')/" CHANGELOG.md
           
           # Add new Unreleased section at the top
-          sed -i '/^# CHANGELOG/a\\n## [Unreleased]' CHANGELOG.md
+          sed -i '/^# Changelog/a\\n## [Unreleased]' CHANGELOG.md
           
           # Update or add version comparison links at the bottom of the file
           if grep -q "^\[Unreleased\]:" CHANGELOG.md; then
@@ -94,18 +88,86 @@ jobs:
             echo "[$VERSION]: $REPO_URL/releases/tag/$VERSION" >> CHANGELOG.md
           fi
 
-      - name: ZIP artifact
-        shell: bash
+      - name: Update metadata.json
         run: |
+          # Install jq for JSON manipulation
           sudo apt-get update
-          sudo apt-get install -y zip
-          zip -r "${{ env.output }}.zip" . -i "*.py" "*.json" "*.md" "__Project__/*" -x "*.git*"
+          sudo apt-get install -y jq
+          
+          # Update version in metadata.json
+          jq --arg version "$VERSION" '.versions[0].version = $version' metadata.json > metadata.json.tmp
+          mv metadata.json.tmp metadata.json
+          
+          echo "Updated metadata.json with version $VERSION"
 
-      - name: Release
-        uses: docker://antonyurchenko/git-release:v6
+      - name: Create plugin archive
+        run: |
+          sudo apt-get install -y zip
+          
+          # Create archive with plugin files
+          zip -r "KiCad-Project-Initialization-Plugin-${VERSION}.zip" \
+            *.py \
+            *.json \
+            *.md \
+            *.png \
+            __Project__ \
+            -x "*.git*" "*.github/*"
+          
+          echo "Created plugin archive: KiCad-Project-Initialization-Plugin-${VERSION}.zip"
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md metadata.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release: Update to version $VERSION"
+            git push origin ${{ github.ref_name }}
+          fi
+
+      - name: Create and push tag
+        run: |
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists, skipping tag creation"
+          else
+            git tag -a "$VERSION" -m "Release $VERSION"
+            git push origin "$VERSION"
+            echo "Tag $VERSION created and pushed"
+          fi
+
+      - name: Wait for tag to be available
+        run: |
+          echo "Waiting for tag to be fully available..."
+          sleep 5
+          git fetch --tags
+          git tag -l "$VERSION"
+
+      - name: Generate release notes
+        run: |
+          # Extract the section for the current version from CHANGELOG.md
+          awk -v version="$VERSION" '
+            /^## \['"$VERSION"'\]/ { found=1; next }
+            /^## \[/ { if(found) exit }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          
+          # Check if we extracted anything
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "## Release $VERSION" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> RELEASE_NOTES.md
+          fi
+
+      - name: Create Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          CHANGELOG_FILE: ./CHANGELOG.md
-        with:
-          args: |
-            ${{ env.output }}.zip
+          VERSION: ${{ env.VERSION }}
+        run: |
+          # Create release using GitHub CLI
+          gh release create "$VERSION" \
+            --title "KiCad Project Initialization Plugin $VERSION" \
+            --notes-file RELEASE_NOTES.md \
+            --target ${{ github.ref_name }} \
+            "KiCad-Project-Initialization-Plugin-${VERSION}.zip"
