@@ -14,12 +14,6 @@ on:
 env:
   output: Plugin
 
-<<<<<<< HEAD
-  # Master branch (main or master). Can be changed for testing
-  master_branch: master
-
-=======
->>>>>>> 6096802 (Task: Add images to the documentation)
 permissions:
   contents: write
 
@@ -34,13 +28,6 @@ jobs:
         with:
           submodules: recursive
 
-<<<<<<< HEAD
-      - name: Download updated CHANGELOG
-        uses: actions/download-artifact@v4
-        with:
-          name: CHANGELOG
-          path: .
-=======
       - name: Extract version from merged branch
         id: extract_version
         run: |
@@ -106,29 +93,18 @@ jobs:
             # First release, link to the tag
             echo "[$VERSION]: $REPO_URL/releases/tag/$VERSION" >> CHANGELOG.md
           fi
->>>>>>> 6096802 (Task: Add images to the documentation)
 
       - name: ZIP artifact
         shell: bash
         run: |
-<<<<<<< HEAD
-          apt-get update
-          apt-get install -y zip
-          zip -r "${{ env.output }}.zip" "."
-=======
           sudo apt-get update
           sudo apt-get install -y zip
           zip -r "${{ env.output }}.zip" . -i "*.py" "*.json" "*.md" "__Project__/*" -x "*.git*"
->>>>>>> 6096802 (Task: Add images to the documentation)
 
       - name: Release
         uses: docker://antonyurchenko/git-release:v6
         env:
-<<<<<<< HEAD
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-=======
           GITHUB_TOKEN: ${{ github.token }}
->>>>>>> 6096802 (Task: Add images to the documentation)
           CHANGELOG_FILE: ./CHANGELOG.md
         with:
           args: |
