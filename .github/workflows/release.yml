@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+' # Match semantic versioning tags
+    branches:
+      - main
+      - dev
+    paths-ignore:
+      - '*.md'
+
+env:
+  output: Plugin
+
+  # Master branch (main or master). Can be changed for testing
+  master_branch: master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    if: github.ref_type == 'tag'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Download updated CHANGELOG
+        uses: actions/download-artifact@v4
+        with:
+          name: CHANGELOG
+          path: .
+
+      - name: ZIP artifact
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y zip
+          zip -r "${{ env.output }}.zip" "."
+
+      - name: Release
+        uses: docker://antonyurchenko/git-release:v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG_FILE: ./CHANGELOG.md
+        with:
+          args: |
+            ${{ env.output }}.zip
