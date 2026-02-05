@@ -1,0 +1,170 @@
+name: KiCad Plugin Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: KiCad Plugin Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from merged branch
+        id: extract_version
+        run: |
+          # Get the merged branch name from the merge commit
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+          
+          # Extract branch name from merge commit message (e.g., "Merge branch '0.0.2_Dev'")
+          BRANCH_NAME=$(echo "$COMMIT_MSG" | sed -n "s/.*Merge.*branch '\([^']*\)'.*/\1/p")
+          
+          if [ -z "$BRANCH_NAME" ]; then
+            # Try alternative merge message format
+            BRANCH_NAME=$(echo "$COMMIT_MSG" | sed -n "s/.*Merge.*branch \"\([^\"]*\)\".*/\1/p")
+          fi
+          
+          if [ -z "$BRANCH_NAME" ]; then
+            # No merge commit found, try to get version from commit message directly
+            echo "::warning::No merge commit detected, trying to extract version from commit message"
+            VERSION=$(echo "$COMMIT_MSG" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(_[A-Za-z0-9]+)?' | head -n 1)
+          else
+            echo "Merged branch: $BRANCH_NAME"
+            # Extract version from branch name (format: X.Y.Z_Dev or X.Y.Z)
+            VERSION=$(echo "$BRANCH_NAME" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(_[A-Za-z0-9]+)?' | head -n 1)
+          fi
+          
+          if [ -z "$VERSION" ]; then
+            echo "::error::No version found in commit message or branch name"
+            exit 1
+          fi
+          
+          # Remove _Dev suffix for the release version
+          RELEASE_VERSION=$(echo "$VERSION" | sed 's/_Dev$//')
+          
+          echo "VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
+          echo "Extracted version: $RELEASE_VERSION"
+
+      - name: Update CHANGELOG.md
+        run: |
+          # Get repository URL
+          REPO_URL="https://github.com/${{ github.repository }}"
+          
+          # Get the previous release tag (exclude current version if it exists)
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | grep -v "^$VERSION$" | head -n 1 || true)
+          
+          # Replace [Unreleased] with [VERSION] - DATE
+          sed -i "s/^## \[Unreleased\]/## [$VERSION] - $(date +'%Y-%m-%d')/" CHANGELOG.md
+          
+          # Add new Unreleased section at the top
+          sed -i '/^# Changelog/a\\n## [Unreleased]' CHANGELOG.md
+          
+          # Update or add version comparison links at the bottom of the file
+          if grep -q "^\[Unreleased\]:" CHANGELOG.md; then
+            # Update existing Unreleased link
+            sed -i "s|^\[Unreleased\]:.*|[Unreleased]: $REPO_URL/compare/$VERSION...HEAD|" CHANGELOG.md
+          else
+            # Add Unreleased link
+            echo "" >> CHANGELOG.md
+            echo "[Unreleased]: $REPO_URL/compare/$VERSION...HEAD" >> CHANGELOG.md
+          fi
+          
+          # Add link for the new version
+          if [ -n "$PREVIOUS_TAG" ]; then
+            # Add comparison link between versions
+            echo "[$VERSION]: $REPO_URL/compare/$PREVIOUS_TAG...$VERSION" >> CHANGELOG.md
+          else
+            # First release, link to the tag
+            echo "[$VERSION]: $REPO_URL/releases/tag/$VERSION" >> CHANGELOG.md
+          fi
+
+      - name: Update metadata.json
+        run: |
+          # Update version in metadata.json
+          # Use jq for JSON manipulation if available, otherwise use sed
+          if command -v jq &> /dev/null; then
+            # Create temporary file with updated version
+            jq --arg version "$VERSION" '.versions[0].version = $version' metadata.json > metadata.json.tmp
+            mv metadata.json.tmp metadata.json
+          else
+            # Fallback to sed if jq is not available
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" metadata.json
+          fi
+          
+          echo "Updated metadata.json with version $VERSION"
+
+      - name: Create plugin archive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+          zip -r "KiCad-Project-Initialization-Plugin-${VERSION}.zip" . \
+            -i "*.py" "*.json" "*.md" "*.png" "__Project__/*" \
+            -x "*.git*" "*.github/*"
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md metadata.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release: Update to version $VERSION"
+            git push origin ${{ github.ref_name }}
+          fi
+
+      - name: Create and push tag
+        run: |
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists, skipping tag creation"
+          else
+            git tag -a "$VERSION" -m "Release $VERSION"
+            git push origin "$VERSION"
+            echo "Tag $VERSION created and pushed"
+          fi
+
+      - name: Wait for tag to be available
+        run: |
+          echo "Waiting for tag to be fully available..."
+          sleep 5
+          git fetch --tags
+          git tag -l "$VERSION"
+
+      - name: Generate release notes
+        run: |
+          # Extract the section for the current version from CHANGELOG.md
+          awk -v version="$VERSION" '
+            /^## \['"$VERSION"'\]/ { found=1; next }
+            /^## \[/ { if(found) exit }
+            found { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          
+          # Check if we extracted anything
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "## Release $VERSION" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> RELEASE_NOTES.md
+          fi
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: ${{ env.VERSION }}
+        run: |
+          # Create release using GitHub CLI
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --notes-file RELEASE_NOTES.md \
+            --target main \
+            "KiCad-Project-Initialization-Plugin-${VERSION}.zip"
+
