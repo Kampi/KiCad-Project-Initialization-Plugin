@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-07
+
 **Added:**
 
 - Add CI/CD pipeline (#1)
@@ -31,3 +33,6 @@
 **Added:**
 
 - Initial release
+
+[Unreleased]: https://github.com/Kampi/KiCad-Project-Initialization-Plugin/compare/2.0.0...HEAD
+[2.0.0]: https://github.com/Kampi/KiCad-Project-Initialization-Plugin/releases/tag/2.0.0
