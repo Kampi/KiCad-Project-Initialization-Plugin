@@ -1,7 +1,7 @@
 {
   "name": "KiCad Project Initialization Plugin",
-  "description": "Initialize KiCad projects with customizable metadata",
-  "description_full": "This plugin allows you to easily initialize or update KiCad project metadata including PROJECT_NAME, BOARD_NAME, DESIGNER, COMPANY, REVISION, and RELEASE_DATE. The plugin updates both the .kicad_pro file text variables and the board title block.",
+  "description": "Create KiCad, PlatformIO and ESP-IDF component projects from the project template",
+  "description_full": "This plugin creates a new project from the bundled project template or updates the metadata of an existing project. New projects can be a KiCad hardware project, a hardware project with PlatformIO firmware, a PlatformIO firmware project or an ESP-IDF component. The plugin applies the PCB template, renames the project files, sets the text variables of the .kicad_pro file (PROJECT_NAME, BOARD_NAME, DESIGNER, COMPANY, REVISION, RELEASE_DATE), keeps the GitHub workflows of the project type and replaces the placeholders of the template.",
   "identifier": "com.github.kicad.project_init",
   "type": "plugin",
   "author": {
@@ -18,7 +18,7 @@
     {
       "version": "1.0.0",
       "status": "stable",
-      "kicad_version": "7.0",
+      "kicad_version": "10.0",
       "download_url": "",
       "download_size": 0,
       "download_sha256": "",

@@ -4,8 +4,10 @@ KiCad Project Initialization Plugin
 This plugin allows you to initialize a KiCad project with customizable metadata
 directly from within KiCad PCBNew.
 
+The steps are the same as in the init scripts of the KiCad library
+(Scripts/init-project.sh and Scripts/init-project.ps1). Keep them in sync.
+
 Author: Daniel Kampert
-Version: 1.0.0
 """
 
 import pcbnew
@@ -31,6 +33,25 @@ def _parse_git_url(url):
 def _make_anchor(text):
     """Convert a string to a lowercase Markdown heading anchor."""
     return re.sub(r'[^a-z0-9-]', '', text.lower().replace(' ', '-'))
+
+def _make_identifier(text):
+    """Convert a repository name to a lowercase C identifier ('my-repo' -> 'my_repo')."""
+    return text.lower().replace('-', '_')
+
+# Project types of the template, same order and meaning as in init-project.sh / init-project.ps1.
+# 'firmware_profile' is the directory in __Project__/firmware that is kept.
+PROJECT_TYPES = [
+    {"name": "Hardware (KiCad project)",
+     "has_hardware": True, "firmware_profile": "blank"},
+    {"name": "Hardware with PlatformIO firmware (ESP32, ESP-IDF)",
+     "has_hardware": True, "firmware_profile": "platformio"},
+    {"name": "PlatformIO firmware (ESP32, ESP-IDF)",
+     "has_hardware": False, "firmware_profile": "platformio"},
+    {"name": "ESP-IDF component",
+     "has_hardware": False, "firmware_profile": "esp-idf-component"},
+]
+
+COMPONENT_PROFILE = "esp-idf-component"
 
 class ProjectModeDialog(wx.Dialog):
     """Dialog to choose between creating new project or updating existing"""
@@ -117,7 +138,7 @@ class NewProjectDialog(wx.Dialog):
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Create input fields
-        grid_sizer = wx.FlexGridSizer(12, 2, 10, 10)
+        grid_sizer = wx.FlexGridSizer(0, 2, 10, 10)
         grid_sizer.AddGrowableCol(1, 1)
 
         # Project Location
@@ -137,9 +158,17 @@ class NewProjectDialog(wx.Dialog):
         self.project_name = wx.TextCtrl(self)
         grid_sizer.Add(self.project_name, 1, wx.EXPAND)
 
-        # Board Name
-        grid_sizer.Add(wx.StaticText(self, label="Board Name:*"), 
+        # Project Type
+        grid_sizer.Add(wx.StaticText(self, label="Project Type:*"),
                       0, wx.ALIGN_CENTER_VERTICAL)
+        self.project_type = wx.Choice(self, choices=[t["name"] for t in PROJECT_TYPES])
+        self.project_type.SetSelection(0)
+        self.project_type.Bind(wx.EVT_CHOICE, self.on_project_type)
+        grid_sizer.Add(self.project_type, 1, wx.EXPAND)
+
+        # Board Name
+        self.board_name_label = wx.StaticText(self, label="Board Name:*")
+        grid_sizer.Add(self.board_name_label, 0, wx.ALIGN_CENTER_VERTICAL)
         self.board_name = wx.TextCtrl(self)
         grid_sizer.Add(self.board_name, 1, wx.EXPAND)
 
@@ -148,6 +177,24 @@ class NewProjectDialog(wx.Dialog):
                       0, wx.ALIGN_CENTER_VERTICAL)
         self.designer = wx.TextCtrl(self)
         grid_sizer.Add(self.designer, 1, wx.EXPAND)
+
+        # Email
+        grid_sizer.Add(wx.StaticText(self, label="Email:*"),
+                      0, wx.ALIGN_CENTER_VERTICAL)
+        self.email = wx.TextCtrl(self)
+        grid_sizer.Add(self.email, 1, wx.EXPAND)
+
+        # GitHub URL
+        grid_sizer.Add(wx.StaticText(self, label="GitHub URL:*"),
+                      0, wx.ALIGN_CENTER_VERTICAL)
+        self.git_url = wx.TextCtrl(self, value="https://github.com/")
+        grid_sizer.Add(self.git_url, 1, wx.EXPAND)
+
+        # Master Branch
+        grid_sizer.Add(wx.StaticText(self, label="Main Branch:"),
+                      0, wx.ALIGN_CENTER_VERTICAL)
+        self.master_branch = wx.TextCtrl(self, value="main")
+        grid_sizer.Add(self.master_branch, 1, wx.EXPAND)
 
         # Company
         grid_sizer.Add(wx.StaticText(self, label="Company:"), 
@@ -161,7 +208,7 @@ class NewProjectDialog(wx.Dialog):
         self.revision = wx.TextCtrl(self, value="1.0.0")
         grid_sizer.Add(self.revision, 1, wx.EXPAND)
 
-        # PCB Template
+        # PCB Template (project types with hardware only)
         grid_sizer.Add(wx.StaticText(self, label="PCB Template:*"), 
                       0, wx.ALIGN_CENTER_VERTICAL)
         self.pcb_templates = self.scan_pcb_templates()
@@ -223,6 +270,19 @@ class NewProjectDialog(wx.Dialog):
         self.SetSizer(main_sizer)
         self.Fit()
 
+    def get_project_type(self):
+        """Return the selected entry of PROJECT_TYPES"""
+        selection = self.project_type.GetSelection()
+        if selection < 0 or selection >= len(PROJECT_TYPES):
+            selection = 0
+        return PROJECT_TYPES[selection]
+
+    def on_project_type(self, event):
+        """The PCB template and the board name are only needed for project types with hardware"""
+        has_hardware = self.get_project_type()["has_hardware"]
+        self.pcb_template.Enable(has_hardware)
+        self.board_name_label.SetLabel("Board Name:*" if has_hardware else "Board Name:")
+
     def on_browse(self, event):
         """Browse for project location"""
         dlg = wx.DirDialog(self, "Choose project location",
@@ -257,8 +317,11 @@ class NewProjectDialog(wx.Dialog):
 
     def get_values(self):
         """Return the entered values as a dictionary"""
+        project_type = self.get_project_type()
+
         selected_template = None
-        if self.pcb_templates and self.pcb_template.GetSelection() >= 0:
+        if (project_type["has_hardware"] and self.pcb_templates
+                and self.pcb_template.GetSelection() >= 0):
             selected_template = self.pcb_templates[self.pcb_template.GetSelection()]
 
         license_selection = self.license.GetSelection()
@@ -270,7 +333,9 @@ class NewProjectDialog(wx.Dialog):
         return {
             'project_location': self.project_location.GetValue(),
             'project_name': self.project_name.GetValue(),
-            'board_name': self.board_name.GetValue(),
+            'project_type': project_type,
+            # Like in the init scripts the board name defaults to the project name
+            'board_name': self.board_name.GetValue() or self.project_name.GetValue(),
             'designer': self.designer.GetValue(),
             'email': self.email.GetValue().strip(),
             'company': self.company.GetValue(),
@@ -311,7 +376,8 @@ class NewProjectDialog(wx.Dialog):
             wx.MessageBox("Project Name is required!", "Validation Error", 
                          wx.OK | wx.ICON_ERROR)
             return False
-        if not self.board_name.GetValue():
+        has_hardware = self.get_project_type()["has_hardware"]
+        if has_hardware and not self.board_name.GetValue():
             wx.MessageBox("Board Name is required!", "Validation Error", 
                          wx.OK | wx.ICON_ERROR)
             return False
@@ -334,8 +400,13 @@ class NewProjectDialog(wx.Dialog):
                          "Expected format: https://github.com/user/repo",
                          "Validation Error", wx.OK | wx.ICON_ERROR)
             return False
-        if not self.pcb_templates:
+        if has_hardware and not self.pcb_templates:
             wx.MessageBox("No PCB templates found in template directory!", "Error", 
+                         wx.OK | wx.ICON_ERROR)
+            return False
+        profile = self.template_path / "firmware" / self.get_project_type()["firmware_profile"]
+        if not profile.is_dir():
+            wx.MessageBox(f"Firmware profile not found in template directory:\n{profile}", "Error",
                          wx.OK | wx.ICON_ERROR)
             return False
         return True
@@ -529,7 +600,7 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                 f"Template directory not found!\n\n"
                 f"Expected: {template_path}\n\n"
                 f"Please ensure the __Project__ template is in the plugin directory.\n"
-                f"You can copy it from D:\\KiCad\\__Project__",
+                f"It is the Git submodule of https://github.com/Kampi/Template-Project",
                 "Template Not Found", 
                 wx.OK | wx.ICON_ERROR
             )
@@ -550,16 +621,21 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             success, project_path = self.copy_and_initialize_template(template_path, values)
 
             if success:
-                wx.MessageBox(
+                message = (
                     f"Project created successfully!\n\n"
                     f"Location: {project_path}\n"
                     f"Project: {values['project_name']}\n"
-                    f"Board: {values['board_name']}\n\n"
-                    f"You can now open the project in KiCad:\n"
-                    f"{project_path / values['board_name'] / (values['board_name'] + '.kicad_pro')}",
-                    "Success", 
-                    wx.OK | wx.ICON_INFORMATION
+                    f"Type: {values['project_type']['name']}\n"
                 )
+                if values['project_type']['has_hardware']:
+                    kicad_pro = (project_path / values['board_name'].lower()
+                                 / (values['board_name'] + '.kicad_pro'))
+                    message += (
+                        f"Board: {values['board_name']}\n\n"
+                        f"You can now open the project in KiCad:\n"
+                        f"{kicad_pro}"
+                    )
+                wx.MessageBox(message, "Success", wx.OK | wx.ICON_INFORMATION)
             else:
                 wx.MessageBox("Failed to create project!", "Error", 
                             wx.OK | wx.ICON_ERROR)
@@ -600,7 +676,7 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             "⚠️ CI/CD Pipeline Limitations:\n"
             "Some GitHub Actions workflows may not function correctly "
             "if your project is missing elements from the template "
-            "(e.g., firmware/, .github/workflows/, kibot_yaml/).\n\n"
+            "(e.g., firmware/, .github/workflows/, scripts/, kibot_yaml/).\n\n"
             "You will have the option to copy missing template files "
             "after updating metadata.\n\n"
             "Continue?",
@@ -633,7 +709,9 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                 "- firmware/ folder (if missing)\n"
                 "- 3d-print/ folder (if missing)\n"
                 "- cad/ folder (if missing)\n"
-                "- .github/workflows/ (if missing)\n\n"
+                "- .github/ with the workflows and the skills (if missing)\n"
+                "- .claude/ with the pointers to the skills (if missing)\n"
+                "- scripts/ folder (if missing)\n\n"
                 "Existing files will NOT be overwritten.",
                 "Copy Template Files?",
                 wx.YES_NO | wx.ICON_QUESTION
@@ -654,7 +732,8 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
 
                 # Copy missing template files if requested
                 if copy_files:
-                    copied_items = self.copy_missing_template_files(project_root, values)
+                    copied_items = self.copy_missing_template_files(project_root, values,
+                                                                    board_dir_name=board_dir.name)
 
                 success_msg = (
                     f"Project metadata updated successfully!\n\n"
@@ -699,11 +778,23 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             data['text_variables']['PROJECT_NAME'] = values['project_name']
             data['text_variables']['BOARD_NAME'] = values['board_name']
             data['text_variables']['DESIGNER'] = values['designer']
-            data['text_variables']['COMPANY'] = values['company'] if values['company'] else 'null'
+            data['text_variables']['COMPANY'] = values['company'] or ''
             data['text_variables']['RELEASE_DATE'] = current_date.strftime("%d-%b-%Y")
             data['text_variables']['RELEASE_DATE_NUM'] = current_date.strftime("%Y-%m-%d")
             data['text_variables']['REVISION'] = values['revision']
             data['text_variables']['GIT_URL'] = values.get('git_url', '')
+
+            # Replace the references to the template project name
+            if isinstance(data.get('meta'), dict) and 'filename' in data['meta']:
+                data['meta']['filename'] = f"{project_file_name}.kicad_pro"
+            for sheet in (data.get('schematic') or {}).get('top_level_sheets') or []:
+                if sheet.get('filename') == 'Template.kicad_sch':
+                    sheet['filename'] = f"{project_file_name}.kicad_sch"
+                if sheet.get('name') == 'Template':
+                    sheet['name'] = project_file_name
+            for sheet in data.get('sheets') or []:
+                if len(sheet) > 1 and sheet[1] == 'Template':
+                    sheet[1] = project_file_name
 
             # Write back to file
             with open(kicad_pro_file, 'w', encoding='utf-8') as f:
@@ -736,11 +827,13 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             print(f"Error updating board metadata: {e}")
 
     def copy_and_initialize_template(self, template_path, values):
-        """Copy template and initialize with values"""
+        """Copy template and initialize with values (same steps as init-project.sh)"""
         try:
             project_location = Path(values['project_location'])
             project_name = values['project_name']
             board_name = values['board_name']
+            project_type = values.get('project_type', PROJECT_TYPES[0])
+            has_hardware = project_type['has_hardware']
 
             # Create project directory
             project_path = project_location / project_name
@@ -754,48 +847,55 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                 )
                 return False, None
 
-            # Copy template
-            shutil.copytree(template_path, project_path)
+            # Copy template. The Git data of the template is a directory in a
+            # regular clone and a file (gitdir link) when it is a submodule.
+            shutil.copytree(template_path, project_path, ignore=shutil.ignore_patterns('.git'))
 
-            # Rename hardware directory to board_name
-            hardware_dir = project_path / "hardware"
-            board_dir = project_path / board_name
-            if hardware_dir.exists():
-                hardware_dir.rename(board_dir)
+            # Remove local KiCad files copied from the template
+            self.remove_local_kicad_files(project_path / "hardware")
 
-            # Apply PCB template
-            if values['pcb_template']:
-                self.apply_pcb_template(board_dir, values['pcb_template'], 
-                                       board_name, project_name)
+            # Keep the firmware profile, the directories and the workflows of the project type
+            self.apply_project_type(project_path, project_type, values.get('git_repo', ''))
 
-            # Rename KiCad project files
-            self.rename_project_files(board_dir, board_name)
+            # The hardware directory is named after the board in lowercase,
+            # like kibot_input_dir in the workflows (${BOARD_NAME_LOWER})
+            board_dir = project_path / board_name.lower()
 
-            # Update schematic title
-            self.update_schematic_title(board_dir, board_name)
+            if has_hardware:
+                hardware_dir = project_path / "hardware"
 
-            # Update .kicad_pro file
-            self.update_project_file(board_dir, board_name, values)
+                # Apply PCB template
+                if values['pcb_template']:
+                    self.apply_pcb_template(hardware_dir, values['pcb_template'],
+                                           board_name, project_name)
 
-            # Update kibot_main.yaml if exists
-            self.update_kibot_config(board_dir, values)
+                # Rename hardware directory
+                if hardware_dir.exists():
+                    hardware_dir.rename(board_dir)
 
-            # Create license files if selected
-            if values['license']['key'] != 'none':
-                self.create_license_files(project_path, board_dir, values)
+                # Rename KiCad project files
+                self.rename_project_files(board_dir, board_name)
+
+                # Update schematic title and the project name of the sheet instances
+                self.update_schematic_title(board_dir, board_name)
+
+                # Update .kicad_pro file
+                self.update_project_file(board_dir, board_name, values)
+
+                # Update kibot_main.yaml if exists
+                self.update_kibot_config(board_dir, values)
 
             # Remove VARIABLES.md from project root
             variables_md = project_path / "VARIABLES.md"
             if variables_md.exists():
                 variables_md.unlink()
 
-            # Remove .git directory copied from template
-            template_git = project_path / ".git"
-            if template_git.exists():
-                shutil.rmtree(template_git)
-
             # Update GitHub Actions workflow files
             self.update_workflow_files(project_path, values)
+
+            # Create license files if selected
+            if values['license']['key'] != 'none':
+                self.create_license_files(project_path, board_dir, values)
 
             # Update commit message template
             self.update_commit_template(project_path, values)
@@ -804,7 +904,10 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             self.update_readme(project_path, values)
 
             # Replace all ${...} placeholders in remaining text files
-            self.replace_all_variables(project_path, values)
+            self.replace_all_variables([project_path], values)
+
+            # Create the AsciiDoc documentation scaffolding
+            self.create_documentation(project_path, values)
 
             return True, project_path
 
@@ -813,6 +916,106 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             import traceback
             traceback.print_exc()
             return False, None
+
+    def remove_local_kicad_files(self, hardware_dir):
+        """Remove backups, footprint cache, local settings and lock files of the template"""
+        if not hardware_dir.exists():
+            return
+        try:
+            for item in hardware_dir.iterdir():
+                name = item.name
+                if (name.endswith('-backups') or name == 'fp-info-cache'
+                        or name.endswith('.kicad_prl') or name.endswith('.lck')):
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
+        except Exception as e:
+            print(f"Error removing local KiCad files: {e}")
+
+    def apply_project_type(self, project_path, project_type, git_repo):
+        """Keep the selected firmware profile and remove the directories and
+        workflows of the other project types (apply_project_type in init-project.sh)"""
+        has_hardware = project_type['has_hardware']
+        profile = project_type['firmware_profile']
+        workflows_dir = project_path / ".github" / "workflows"
+        firmware_dir = project_path / "firmware"
+        profile_path = firmware_dir / profile
+
+        if not profile_path.is_dir():
+            raise FileNotFoundError(f"Firmware profile not found: {profile_path}")
+
+        def remove(path):
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+
+        def remove_workflows(pattern):
+            if workflows_dir.exists():
+                for workflow in workflows_dir.glob(pattern):
+                    workflow.unlink()
+
+        # Hardware: KiCad project, hardware workflows and the release skills
+        if not has_hardware:
+            for name in ("hardware", "cad", "3d-print"):
+                remove(project_path / name)
+            remove(project_path / ".github" / "skills")
+            remove(project_path / ".claude" / "skills")
+            # .claude only contains the pointers to the skills
+            claude_dir = project_path / ".claude"
+            if claude_dir.is_dir() and not any(claude_dir.iterdir()):
+                claude_dir.rmdir()
+            remove_workflows("hw-*.yaml")
+
+        # Workflows of the firmware profiles that are not used
+        if profile != "platformio":
+            remove_workflows("fw-platformio.yaml")
+        if profile != COMPONENT_PROFILE:
+            remove_workflows("fw-esp-component*.yaml")
+
+        if profile == COMPONENT_PROFILE:
+            # The component is the repository root, the profile brings its own
+            # README.md, CHANGELOG.md and .gitignore
+            remove_workflows("docs-*.yaml")
+            remove(project_path / "README.md")
+            remove(project_path / ".gitignore")
+            shutil.copytree(profile_path, project_path, dirs_exist_ok=True)
+            shutil.rmtree(firmware_dir)
+
+            # Name the sources after the component
+            component = _make_identifier(git_repo)
+            (project_path / "include" / "template.h").rename(
+                project_path / "include" / f"{component}.h")
+            (project_path / "src" / "template.c").rename(
+                project_path / "src" / f"{component}.c")
+
+            format_workflow = workflows_dir / "fw-format.yaml"
+            if format_workflow.exists():
+                content = format_workflow.read_text(encoding='utf-8')
+                content = re.sub(r'(?m)^  source_dirs: .*$',
+                                 '  source_dirs: src include examples', content)
+                format_workflow.write_text(content, encoding='utf-8')
+        else:
+            # The selected profile becomes the content of firmware/
+            for item in firmware_dir.iterdir():
+                if item.is_dir() and item.name != profile:
+                    shutil.rmtree(item)
+            shutil.copytree(profile_path, firmware_dir, dirs_exist_ok=True)
+            shutil.rmtree(profile_path)
+
+        # README badges of removed workflows
+        readme = project_path / "README.md"
+        if readme.exists():
+            lines = readme.read_text(encoding='utf-8').splitlines(keepends=True)
+            for workflow_name in ("hw-pcb.yaml", "fw-platformio.yaml", "fw-esp-component.yaml"):
+                if not (workflows_dir / workflow_name).exists():
+                    lines = [line for line in lines
+                             if f"actions/workflows/{workflow_name}" not in line]
+            if not has_hardware:
+                pattern = re.compile(r'^- \*\*`(3d-print|cad|\$\{BOARD_NAME_LOWER\})`\*\*')
+                lines = [line for line in lines if not pattern.match(line)]
+            readme.write_text(''.join(lines), encoding='utf-8')
 
     def apply_pcb_template(self, board_dir, template_info, board_name, project_name):
         """Apply selected PCB template"""
@@ -831,8 +1034,9 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                 target_pcb.write_text(content, encoding='utf-8')
 
                 # Remove all other template files
-                for template_file in board_dir.glob("Template - *.kicad_pcb"):
-                    template_file.unlink()
+                for pattern in ("Template - *.kicad_pcb", "Template - *.kicad_pro"):
+                    for template_file in board_dir.glob(pattern):
+                        template_file.unlink()
 
         except Exception as e:
             print(f"Error applying PCB template: {e}")
@@ -854,6 +1058,13 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                 content = sch_file.read_text(encoding='utf-8')
                 content = re.sub(r'\(title "Template"\)', f'(title "{board_name}")', content)
                 sch_file.write_text(content, encoding='utf-8')
+
+            # Sheet instances (page numbers) are stored per project name
+            for sheet in board_dir.glob("*.kicad_sch"):
+                content = sheet.read_text(encoding='utf-8')
+                updated = content.replace('(project "Template"', f'(project "{board_name}"')
+                if updated != content:
+                    sheet.write_text(updated, encoding='utf-8')
         except Exception as e:
             print(f"Error updating schematic title: {e}")
 
@@ -872,7 +1083,7 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             content = re.sub(r'BOARD_NAME: Board', 
                            f'BOARD_NAME: {values["board_name"]}', content)
             content = re.sub(r'COMPANY: Kampis-Elektroecke', 
-                           f'COMPANY: {values["company"] or "null"}', content)
+                           f'COMPANY: {values["company"] or ""}', content)
             content = re.sub(r'DESIGNER: Daniel Kampert', 
                            f'DESIGNER: {values["designer"]}', content)
             content = re.sub(r"GIT_URL: 'https://github\.com/Kampi/KiCad'",
@@ -883,8 +1094,11 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
         except Exception as e:
             print(f"Error updating kibot config: {e}")
 
-    def copy_missing_template_files(self, project_root, values):
-        """Copy missing directories and files from template to existing project"""
+    def copy_missing_template_files(self, project_root, values, board_dir_name=None):
+        """Copy missing directories and files from template to existing project.
+        An existing project is a hardware project: the copied directories get the
+        blank firmware profile and only the workflows of that project type.
+        'board_dir_name' is the name of the existing hardware directory."""
         try:
             plugin_dir = Path(__file__).parent
             template_path = plugin_dir / "__Project__"
@@ -893,9 +1107,10 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                 return ["Error: Template not found in plugin directory"]
 
             copied_items = []
+            copied_paths = []
 
-            # Directories to copy if missing
-            dirs_to_copy = ['firmware', '3d-print', 'cad', '.github']
+            # Directories to copy if missing. The workflows need the scripts.
+            dirs_to_copy = ['firmware', '3d-print', 'cad', '.github', '.claude', 'scripts']
 
             for dir_name in dirs_to_copy:
                 src_dir = template_path / dir_name
@@ -905,8 +1120,29 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                     try:
                         shutil.copytree(src_dir, dst_dir)
                         copied_items.append(f"{dir_name}/ (complete folder)")
+                        copied_paths.append(dst_dir)
                     except Exception as e:
                         print(f"Error copying {dir_name}: {e}")
+
+            # Firmware: keep the blank profile as content of firmware/
+            firmware_dir = project_root / 'firmware'
+            if firmware_dir in copied_paths:
+                profile_path = firmware_dir / 'blank'
+                for item in firmware_dir.iterdir():
+                    if item.is_dir() and item.name != 'blank':
+                        shutil.rmtree(item)
+                if profile_path.is_dir():
+                    shutil.copytree(profile_path, firmware_dir, dirs_exist_ok=True)
+                    shutil.rmtree(profile_path)
+
+            # Workflows: remove the ones of the other firmware profiles
+            workflows_dir = project_root / '.github' / 'workflows'
+            if (project_root / '.github') in copied_paths and workflows_dir.exists():
+                for pattern in ("fw-platformio.yaml", "fw-esp-component*.yaml"):
+                    for workflow in workflows_dir.glob(pattern):
+                        workflow.unlink()
+                self.update_workflow_files(project_root, values)
+                self.update_commit_template(project_root, values)
 
             # Update README.md if it doesn't exist
             readme_src = template_path / "README.md"
@@ -914,8 +1150,14 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
             if readme_src.exists() and not readme_dst.exists():
                 try:
                     shutil.copy2(readme_src, readme_dst)
+                    lines = readme_dst.read_text(encoding='utf-8').splitlines(keepends=True)
+                    for workflow_name in ("fw-platformio.yaml", "fw-esp-component.yaml"):
+                        lines = [line for line in lines
+                                 if f"actions/workflows/{workflow_name}" not in line]
+                    readme_dst.write_text(''.join(lines), encoding='utf-8')
                     self.update_readme(project_root, values)
                     copied_items.append("README.md")
+                    copied_paths.append(readme_dst)
                 except Exception as e:
                     print(f"Error copying README: {e}")
 
@@ -928,6 +1170,10 @@ class KiCadProjectInit(pcbnew.ActionPlugin):
                     copied_items.append(".gitignore")
                 except Exception as e:
                     print(f"Error copying .gitignore: {e}")
+
+            # Set the ${...} placeholders in the copied files only
+            if copied_paths:
+                self.replace_all_variables(copied_paths, values, board_name_lower=board_dir_name)
 
             return copied_items if copied_items else ["No missing files found"]
 
@@ -1009,12 +1255,13 @@ Please visit https://opensource.org/licenses/ for full license text.
     # ------------------------------------------------------------------
 
     def update_workflow_files(self, project_path, values):
-        """Update GitHub Actions workflow files with project-specific values"""
+        """Update GitHub Actions workflow files with project-specific values.
+        The board name and the directories are ${...} placeholders, they are
+        set by replace_all_variables()."""
         workflows_dir = project_path / ".github" / "workflows"
         if not workflows_dir.exists():
             return
 
-        board_name_anchor = _make_anchor(values['board_name'])
         master_branch = values.get('master_branch', 'main')
 
         for wf_file in workflows_dir.glob("*.yaml"):
@@ -1025,13 +1272,7 @@ Please visit https://opensource.org/licenses/ for full license text.
                 content = re.sub(r'master_branch:\s*main', f'master_branch: {master_branch}', content)
                 content = re.sub(r'master_branch:\s*master', f'master_branch: {master_branch}', content)
 
-                if wf_file.name == "pcb.yaml":
-                    content = re.sub(r'kicad_board:\s*Template-Project',
-                                     f'kicad_board: {values["board_name"]}', content)
-                    content = re.sub(r'kibot_input_dir:\s*\S+',
-                                     f'kibot_input_dir: {board_name_anchor}', content)
-                    content = re.sub(r'kibot_output_dir:\s*\S+',
-                                     f'kibot_output_dir: {board_name_anchor}', content)
+                if wf_file.name == "hw-pcb.yaml":
                     # New projects start in DRAFT state
                     content = re.sub(r'kibot_variant:\s*PRELIMINARY',
                                      'kibot_variant: DRAFT', content)
@@ -1055,61 +1296,35 @@ Please visit https://opensource.org/licenses/ for full license text.
             print(f"Error updating commit template: {e}")
 
     def update_readme(self, project_path, values):
-        """Update README.md placeholders with actual project values"""
+        """Set the license badge of the README.md. All other placeholders are
+        set by replace_all_variables()."""
         readme = project_path / "README.md"
         if not readme.exists():
             return
         try:
             content = readme.read_text(encoding='utf-8')
 
-            git_url_clean = values.get('git_url', '').rstrip('/')
-            git_user = values.get('git_user', '')
-            git_repo = values.get('git_repo', '')
-            designer = values['designer']
-            email = values.get('email', '')
             license_info = values.get('license', {})
             license_badge = license_info.get('badge', '')
             license_key = license_info.get('key', '')
-            project_name_anchor = _make_anchor(values['project_name'])
-            board_name_anchor = _make_anchor(values['board_name'])
 
-            # Replace ${...} placeholder variables
-            content = content.replace('${GIT_URL}', git_url_clean)
-            content = content.replace('${GIT_USER}', git_user)
-            content = content.replace('${GIT_REPO}', git_repo)
-            content = content.replace('${PROJECT_NAME}', values['project_name'])
-            content = content.replace('${BOARD_NAME}', values['board_name'])
-            content = content.replace('${DESIGNER}', designer)
-            content = content.replace('${EMAIL}', email)
-            content = content.replace('${COMPANY}', values.get('company', ''))
-            content = content.replace('${PROJECT_NAME_ANCHOR}', project_name_anchor)
-            content = content.replace('${BOARD_NAME_ANCHOR}', board_name_anchor)
-
-            # Replace legacy "$..." placeholders
-            content = content.replace('"$Project"', values['project_name'])
-            content = content.replace('"$User"', git_user)
-            content = content.replace('"$Designer"', designer)
-            content = content.replace('"$Email"', email)
-
-            # Update license badge
             if license_badge:
-                content = re.sub(
-                    r'https://img\.shields\.io/badge/License-[^)]+\)',
-                    f'https://img.shields.io/badge/License-{license_badge}.svg)',
-                    content
-                )
-                content = re.sub(
-                    r'https://opensource\.org/license/[^)]+\)',
-                    f'https://opensource.org/license/{license_key}/)',
-                    content
-                )
+                license_link = f'https://opensource.org/license/{license_key}/'
+            else:
+                license_badge = 'No-License-lightgrey'
+                license_link = 'https://choosealicense.com/no-permission/'
+
+            content = content.replace('${LICENSE_BADGE}', license_badge)
+            content = content.replace('${LICENSE_LINK}', license_link)
 
             readme.write_text(content, encoding='utf-8')
         except Exception as e:
             print(f"Error updating README.md: {e}")
 
-    def replace_all_variables(self, project_path, values):
-        """Replace all ${...} template placeholders in all text files"""
+    def replace_all_variables(self, paths, values, board_name_lower=None):
+        """Replace all ${...} template placeholders in all text files below the
+        given files and directories. 'board_name_lower' overrides the name of the
+        hardware directory for existing projects."""
         skip_extensions = {
             '.kicad_pcb', '.kicad_sch', '.kicad_pro', '.kicad_prl',
             '.kicad_wks', '.png', '.jpg', '.jpeg', '.gif', '.pdf',
@@ -1122,6 +1337,10 @@ Please visit https://opensource.org/licenses/ for full license text.
         current_year = str(datetime.date.today().year)
         project_name_anchor = _make_anchor(values['project_name'])
         board_name_anchor = _make_anchor(values['board_name'])
+        git_repo = values.get('git_repo', '')
+        git_url = values.get('git_url', '').rstrip('/').removesuffix('.git')
+        if board_name_lower is None:
+            board_name_lower = values['board_name'].lower()
 
         replacements = {
             '${PROJECT_NAME}':        values['project_name'],
@@ -1134,17 +1353,32 @@ Please visit https://opensource.org/licenses/ for full license text.
             '${RELEASE_DATE_NUM}':    release_date_num,
             '${CURRENT_DATE}':        release_date,
             '${CURRENT_YEAR}':        current_year,
-            '${GIT_URL}':             values.get('git_url', ''),
+            '${GIT_URL}':             git_url,
             '${GIT_USER}':            values.get('git_user', ''),
-            '${GIT_REPO}':            values.get('git_repo', ''),
+            '${GIT_REPO}':            git_repo,
+            # Repository name as C identifier (file names, functions, CMake variables)
+            '${GIT_REPO_LOWER}':      _make_identifier(git_repo),
+            '${GIT_REPO_UPPER}':      _make_identifier(git_repo).upper(),
             '${MASTER_BRANCH}':       values.get('master_branch', 'main'),
             '${PROJECT_NAME_ANCHOR}': project_name_anchor,
             '${BOARD_NAME_ANCHOR}':   board_name_anchor,
+            '${BOARD_NAME_LOWER}':    board_name_lower,
+            # Legacy "$..." placeholders
+            '"$Project"':             values['project_name'],
+            '"$Designer"':            values['designer'],
+            '"$Email"':               values.get('email', ''),
+            '"$User"':                values.get('git_user', ''),
         }
 
-        for file_path in project_path.rglob('*'):
-            if not file_path.is_file():
-                continue
+        files = []
+        for path in paths:
+            path = Path(path)
+            if path.is_file():
+                files.append(path)
+            elif path.is_dir():
+                files.extend(p for p in path.rglob('*') if p.is_file())
+
+        for file_path in files:
             # Skip hidden/special directories
             if any(part in skip_dirs for part in file_path.parts):
                 continue
@@ -1154,11 +1388,106 @@ Please visit https://opensource.org/licenses/ for full license text.
             if file_path.name.endswith('~') or file_path.name.endswith('.bak'):
                 continue
             try:
-                content = file_path.read_text(encoding='utf-8')
+                # newline='' keeps the line endings of the template
+                with open(file_path, 'r', encoding='utf-8', newline='') as f:
+                    content = f.read()
+                updated = content
                 for placeholder, value in replacements.items():
-                    content = content.replace(placeholder, value)
-                file_path.write_text(content, encoding='utf-8')
+                    updated = updated.replace(placeholder, value)
+                if updated != content:
+                    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+                        f.write(updated)
             except (UnicodeDecodeError, PermissionError):
                 pass  # Skip binary or unreadable files
             except Exception as e:
                 print(f"Error replacing variables in {file_path}: {e}")
+
+    def create_documentation(self, project_path, values):
+        """Create the AsciiDoc documentation scaffolding in firmware/docs/.
+        The ESP-IDF component documents itself in the README.md."""
+        project_type = values.get('project_type', PROJECT_TYPES[0])
+        if project_type['firmware_profile'] == COMPONENT_PROFILE:
+            return
+        try:
+            docs_dir = project_path / "firmware" / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+
+            today = datetime.date.today().strftime('%Y-%m-%d')
+            license_name = values.get('license', {}).get('name') or 'TBD'
+            git_url = values.get('git_url', '').rstrip('/').removesuffix('.git')
+
+            content = f"""= {values['project_name']} Documentation
+{values['designer']} <{values.get('email', '')}>
+v1.0, {today}
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: highlight.js
+
+== Overview
+
+This document provides comprehensive documentation for the *{values['project_name']}* hardware project.
+
+== Project Information
+
+[cols="1,2"]
+|===
+|Project Name |{values['project_name']}
+|Board Name |{values['board_name']}
+|Designer |{values['designer']}
+|Email |{values.get('email', '')}
+|Company |{values.get('company') or 'N/A'}
+|Repository |{git_url}
+|License |{license_name}
+|===
+
+== Getting Started
+
+=== Prerequisites
+
+* KiCad 7.0 or later
+* Basic understanding of PCB design
+
+=== Project Structure
+
+Refer to the main README.md for detailed information about the project structure.
+
+== Hardware Design
+
+=== Schematic
+
+TBD - Add schematic overview and block diagrams
+
+=== PCB Layout
+
+TBD - Add PCB layout information and design considerations
+
+=== Bill of Materials (BoM)
+
+TBD - Add component list and sourcing information
+
+== Assembly Instructions
+
+TBD - Add assembly steps and guidelines
+
+== Testing & Validation
+
+TBD - Add testing procedures and validation criteria
+
+== Revision History
+
+[cols="1,2,2,3"]
+|===
+|Version |Date |Author |Changes
+
+|1.0
+|{today}
+|{values['designer']}
+|Initial release
+
+|===
+"""
+            with open(docs_dir / "index.adoc", 'w', encoding='utf-8', newline='\n') as f:
+                f.write(content)
+        except Exception as e:
+            print(f"Error creating documentation: {e}")

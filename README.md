@@ -6,7 +6,7 @@ A vibe-coded KiCad Action Plugin for creating new projects from a given project 
 
 This plugin is based on the [`init-project.sh`](https://github.com/Kampi/KiCad/tree/master/Scripts) script and offers two main functions:
 
-1. **Create New Project** - Copies the `__Project__` from [KiCad Library](https://github.com/Kampi/KiCad) repository template and initializes all files
+1. **Create New Project** - Copies the `__Project__` template ([Template-Project](https://github.com/Kampi/Template-Project) 2.0.0 or later) and initializes all files for the selected project type
 2. **Update Existing Project** - Updates metadata of an already opened project
 
 ![Create Project](docs/images/Create%20Project.jpg)
@@ -15,39 +15,59 @@ This plugin is based on the [`init-project.sh`](https://github.com/Kampi/KiCad/t
 
 ## Features
 
-- ✅ **Complete project creation from template** (like the original script)
+- ✅ **Complete project creation from template** (same steps as the original script)
+- ✅ Project type selection (hardware, PlatformIO firmware, ESP-IDF component)
 - ✅ PCB template selection (various manufacturers, thicknesses, layers)
 - ✅ Automatic file renaming (Template → BoardName)
 - ✅ Graphical user interface for entering project data
 - ✅ Automatic update of `.kicad_pro` file (text_variables)
 - ✅ Update of Board Title Block
 - ✅ KiBot configuration is automatically adjusted
-- ✅ Support for all important metadata fields
+- ✅ GitHub workflows, README, commit message template and agent skills are set up for the project
+- ✅ Replacement of all `${...}` placeholders of the template
 - ✅ Validation of required fields
 - ✅ Automatic date generation
 - ✅ License selection and download (11 open-source licenses)
+
+## Project Types
+
+The project type decides which parts of the template end up in the new project. The types are the same as in the init scripts:
+
+| Project type | Hardware | Firmware profile | Result |
+| ------------ | -------- | ---------------- | ------ |
+| Hardware (KiCad project) | Yes | `firmware/blank` | KiCad project with an empty firmware directory |
+| Hardware with PlatformIO firmware | Yes | `firmware/platformio` | KiCad project and a PlatformIO project (ESP32, ESP-IDF) in `firmware/` |
+| PlatformIO firmware | No | `firmware/platformio` | PlatformIO project (ESP32, ESP-IDF) in `firmware/` |
+| ESP-IDF component | No | `firmware/esp-idf-component` | Component in the project root, sources named after the repository |
+
+- Only the GitHub workflows of the project type are kept: `hw-*` with hardware, `fw-platformio` with the PlatformIO profile, `fw-esp-component*` for the component
+- Project types without hardware get no KiCad project, no `cad` and `3d-print` directories and no release skills
+- The PCB template is only used for project types with hardware
 
 ## Two Modes
 
 ### 1. Create New Project
 
 - Copies the complete `__Project__` template structure
+- Applies the project type (firmware profile, workflows, directories)
 - Selects PCB template (e.g., "pcbway_1.6mm_2-layer")
-- Renames all files (Template → BoardName)
-- Updates all configuration files
-- Creates complete project structure with:
+- Renames the `hardware` directory to the lowercase board name and all files (Template → BoardName)
+- Updates all configuration files and replaces the placeholders
+- Creates complete project structure with (depending on the project type):
   - Hardware (KiCad files)
   - Firmware
   - 3D-Print
   - CAD
-  - GitHub Workflows
+  - GitHub Workflows and agent skills
   - KiBot configuration
+  - AsciiDoc documentation scaffolding in `firmware/docs/`
 
 ### 2. Update Existing Project
 
 - Updates only metadata of an opened project
 - Does not change file structure
 - Quick update of Project Name, Designer, Company, etc.
+- Optionally adds missing template files (`firmware/`, `3d-print/`, `cad/`, `.github/`, `.claude/`, `scripts/`, `README.md`, `.gitignore`) for a hardware project. Existing files are not overwritten
 
 ## Updated Fields
 
@@ -60,6 +80,7 @@ This plugin is based on the [`init-project.sh`](https://github.com/Kampi/KiCad/t
 - `RELEASE_DATE` - Current date (dd-MMM-yyyy format)
 - `RELEASE_DATE_NUM` - Current date (yyyy-MM-dd format)
 - `REVISION` - Version number (default: 1.0.0)
+- `GIT_URL` - URL of the GitHub repository
 
 ### In the Board Title Block
 
@@ -71,7 +92,7 @@ This plugin is based on the [`init-project.sh`](https://github.com/Kampi/KiCad/t
 
 ## Installation
 
-### Automatic Installation (KiCad 7.0+)
+### Automatic Installation (KiCad 10.0+)
 
 1. Open KiCad PCBNew
 2. Go to **Tools** → **External Plugins** → **Open Plugin Directory**
@@ -102,6 +123,8 @@ The plugin directory is located in different places depending on the operating s
 
 Copy the entire `kicad_project_init_plugin` folder to one of these directories.
 
+The template is a Git submodule. Clone the plugin with `git clone --recurse-submodules` or run `git submodule update --init` afterwards, otherwise the `__Project__` folder is empty.
+
 ## Usage
 
 ### Mode 1: Create New Project
@@ -112,15 +135,19 @@ Copy the entire `kicad_project_init_plugin` folder to one of these directories.
 4. Fill in the required fields:
    - **Project Location** - Where the project should be created
    - **Project Name** * (required) - Name of the project folder
-   - **Board Name** * (required) - Name of the PCB/circuit
+   - **Project Type** * (required) - See [Project Types](#project-types)
+   - **Board Name** * (required with hardware) - Name of the PCB/circuit. Without hardware it defaults to the project name
    - **Designer** * (required)
+   - **Email** * (required)
+   - **GitHub URL** * (required) - e.g. `https://github.com/user/repo`. User and repository are taken from it
+   - **Main Branch** (default: main)
    - **Company** (optional)
    - **Revision** (default: 1.0.0)
-   - **PCB Template** * - Select manufacturer/thickness/layers
+   - **PCB Template** * - Select manufacturer/thickness/layers (project types with hardware only)
    - **License** - Select project license (MIT, Apache 2.0, GPL 3.0, etc. or None)
    - **Description** (optional)
 5. Click **Create Project**
-6. The complete project will be created and can be opened in KiCad
+6. The complete project will be created. A project with hardware can be opened in KiCad from `<project>/<board name in lowercase>/<BoardName>.kicad_pro`
 
 ### Mode 2: Update Existing Project
 
@@ -134,7 +161,7 @@ Copy the entire `kicad_project_init_plugin` folder to one of these directories.
 
 ## Template Requirements
 
-The plugin includes the `__Project__` template directly in the plugin folder:
+The plugin includes the `__Project__` template (Git submodule of [Template-Project](https://github.com/Kampi/Template-Project)) directly in the plugin folder:
 
 ```text
 kicad_project_init_plugin/
@@ -152,26 +179,36 @@ kicad_project_init_plugin/
     │   ├── Template - pcbway_1.6mm_4-layer.kicad_pcb
     │   └── kibot_yaml/
     ├── firmware/
+    │   ├── blank/
+    │   ├── platformio/
+    │   └── esp-idf-component/
     ├── 3d-print/
     ├── cad/
-    └── .github/workflows/
+    ├── scripts/
+    ├── .claude/skills/
+    └── .github/
+        ├── skills/
+        └── workflows/
 ```
 
 The plugin is thus completely portable - no separate template setup required!
 
+The plugin needs the template project 2.0.0 or later with the firmware profiles in `firmware/` and the workflows named `hw-*`, `fw-*`, `docs-*` and `common-*`.
+
 ## Requirements
 
-- KiCad 7.0 or newer (>9.0 recommended)
-- Python 3.x (included with KiCad)
+- KiCad 10.0 or newer (the template files use KiCad 10)
+- Python 3.9 or newer (included with KiCad)
 - wxPython (included with KiCad)
 
 ## Differences from Original Script
 
-The plugin now offers the **complete functionality** of template-based project creation!
+The plugin creates the same files as `init-project.sh` and `init-project.ps1` for every project type.
 
 ### Implemented Features (like in the script)
 
 - ✅ Create new project from template
+- ✅ Project type selection with firmware profiles
 - ✅ PCB template selection
 - ✅ Automatic file renaming
 - ✅ .kicad_pro metadata update
@@ -179,17 +216,19 @@ The plugin now offers the **complete functionality** of template-based project c
 - ✅ KiBot configuration update
 - ✅ Project structure creation
 - ✅ License selection and download
+- ✅ GitHub workflow configuration (main branch, board name, workflows of the project type)
+- ✅ README.md and commit message template
+- ✅ Placeholder replacement in all text files
+- ✅ AsciiDoc documentation scaffolding
 
 ### Not Implemented Features (remain in the script)
 
 The following features are deliberately **not** included in the plugin, as they are better suited outside of KiCad:
 
 - ❌ Git initialization and first commits
-- ❌ GitHub workflow configuration (master_branch, etc.)
-- ❌ GitHub remote configuration
-- ❌ README.md generation
-- ❌ AsciiDoc documentation
-- ❌ Commit message template
+- ❌ GitHub remote configuration and push
+
+Run `git init` in the new project yourself and set the commit message template with `git config commit.template .github/.commit-msg-template`.
 
 ### When Updating Existing Projects
 
